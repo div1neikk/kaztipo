@@ -1,4 +1,6 @@
 import flet as ft
+import win32print
+import win32ui
 
 def main(page: ft.Page):
     page.title = "divine prod"
@@ -18,6 +20,33 @@ def main(page: ft.Page):
         ),
     }
 
+    def get_printers():
+        return [printer[2] for printer in win32print.EnumPrinters(2)]
+
+    def print_document():
+        printers = get_printers()
+        if not printers:
+            page.snack_bar = ft.SnackBar(ft.Text("Принтеры не найдены"))
+            page.snack_bar.open = True
+            page.update()
+            return
+
+        printer_name = printers[0]
+        hprinter = win32print.OpenPrinter(printer_name)
+        printer_info = win32print.GetPrinter(hprinter, 2)
+        pdc = win32ui.CreateDC()
+        pdc.CreatePrinterDC(printer_name)
+        pdc.StartDoc('Test Print')
+        pdc.StartPage()
+        pdc.TextOut(100, 100, "Hello, Printer!")
+        pdc.EndPage()
+        pdc.EndDoc()
+        pdc.DeleteDC()
+
+        page.snack_bar = ft.SnackBar(ft.Text(f"Документ отправлен на {printer_name}"))
+        page.snack_bar.open = True
+        page.update()
+
     def change_theme(e):
         page.theme_mode = "light" if page.theme_mode == "dark" else "dark"
         page.update()
@@ -36,6 +65,8 @@ def main(page: ft.Page):
             page.views.append(price_view())
         elif page.route == "/advertising":
             page.views.append(advertising_view())
+        elif page.route == "/print_usb":
+            page.views.append(print_usb_view())
         page.update()
 
     def go_back(e):
@@ -74,7 +105,7 @@ def main(page: ft.Page):
                     ft.IconButton(ft.icons.SUNNY, icon_size=30, on_click=change_theme),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Row([
-                    ft.ElevatedButton("Печать с USB", **button_style),
+                    ft.ElevatedButton("Печать с USB", on_click=lambda _: page.go("/print_usb"),**button_style),
                     ft.ElevatedButton("Печать с Telegram", **button_style),
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=13),
                 ft.Row([
@@ -137,6 +168,17 @@ def main(page: ft.Page):
             ]
         )
 
+    def print_usb_view():
+        return ft.View(
+            "/print_usb",
+            controls=[
+                ft.Text("Печать с USB", size=30, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+                ft.ElevatedButton("Распечатать документ", on_click=lambda _: print_document()),
+                ft.Row([
+                    ft.ElevatedButton("Назад", on_click=lambda _: page.go("/print"), width=150, height=50),
+                ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
+            ]
+        )
     page.on_route_change = route_change
     page.go("/")
 
