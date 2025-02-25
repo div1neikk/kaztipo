@@ -4,3 +4,4 @@ python -m venv venv
 
 source/Scripts/activate
 pip install flet[all]
+pip install pywin32
