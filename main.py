@@ -1,6 +1,11 @@
 import flet as ft
 import win32print
 import win32ui
+import os
+import psutil
+
+
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx"}
 
 def main(page: ft.Page):
     page.title = "divine prod"
@@ -20,32 +25,37 @@ def main(page: ft.Page):
         ),
     }
 
+    def get_usb_drives():
+        drives = []
+        for part in psutil.disk_partitions():
+            if "removable" in part.opts or (
+                    "cdrom" not in part.opts and part.device.startswith(("/dev/sd", "E:", "F:", "G:"))):
+                drives.append(part.device)
+        return drives
+
+    def list_files_in_usb(drive):
+        try:
+            return [f for f in os.listdir(drive) if os.path.splitext(f)[1].lower() in ALLOWED_EXTENSIONS]
+        except Exception as e:
+            return []
+
     def get_printers():
         return [printer[2] for printer in win32print.EnumPrinters(2)]
 
-    def print_document():
-        printers = get_printers()
-        if not printers:
-            page.snack_bar = ft.SnackBar(ft.Text("Принтеры не найдены"))
-            page.snack_bar.open = True
-            page.update()
-            return
-
-        printer_name = printers[0]
+    def print_document(file_path, copies):
+        printer_name = win32print.GetDefaultPrinter()
         hprinter = win32print.OpenPrinter(printer_name)
-        printer_info = win32print.GetPrinter(hprinter, 2)
         pdc = win32ui.CreateDC()
         pdc.CreatePrinterDC(printer_name)
-        pdc.StartDoc('Test Print')
-        pdc.StartPage()
-        pdc.TextOut(100, 100, "Hello, Printer!")
-        pdc.EndPage()
+
+        pdc.StartDoc(file_path)
+        for _ in range(copies):
+            pdc.StartPage()
+            pdc.TextOut(100, 100, f"Печать: {os.path.basename(file_path)}")
+            pdc.EndPage()
         pdc.EndDoc()
         pdc.DeleteDC()
-
-        page.snack_bar = ft.SnackBar(ft.Text(f"Документ отправлен на {printer_name}"))
-        page.snack_bar.open = True
-        page.update()
+        win32print.ClosePrinter(hprinter)
 
     def change_theme(e):
         page.theme_mode = "light" if page.theme_mode == "dark" else "dark"
@@ -169,11 +179,68 @@ def main(page: ft.Page):
         )
 
     def print_usb_view():
+        file_list = ft.Column()
+        copies_field = ft.TextField(label="Количество копий", value="1", width=100)
+        selected_file = ft.Text()
+
+        def check_usb(e):
+            drives = get_usb_drives()
+            file_list.controls.clear()
+            if drives:
+                usb_drive = drives[0]
+                files = list_files_in_usb(usb_drive)
+                if files:
+                    for file in files:
+                        file_list.controls.append(
+                            ft.TextButton(text=file, on_click=lambda e, f=file: show_print_dialog(f, usb_drive)))
+                else:
+                    file_list.controls.append(ft.Text("Файлы не найдены", size=16))
+            else:
+                file_list.controls.append(ft.Text("Флешка не найдена", size=16))
+            page.update()
+
+        def show_print_dialog(file, usb_drive):
+            selected_file.value = file
+
+            def start_printing(e):
+                file_path = os.path.join(usb_drive, file)
+                try:
+                    copies = int(copies_field.value)
+                    if copies < 1:
+                        raise ValueError
+                    print_document(file_path, copies)
+                    page.snack_bar = ft.SnackBar(ft.Text(f"Документ {file} отправлен на печать ({copies} копий)"))
+                    page.snack_bar.open = True
+                    close_dialog()
+                except ValueError:
+                    page.snack_bar = ft.SnackBar(ft.Text("Ошибка: введите корректное число копий"))
+                    page.snack_bar.open = True
+                    page.update()
+
+            def close_dialog():
+                page.dialog.open = False
+                page.update()
+
+            page.dialog = ft.AlertDialog(
+                title=ft.Text("Параметры печати"),
+                content=ft.Column([
+                    ft.Text(f"Файл: {file}"),
+                    copies_field
+                ]),
+                actions=[
+                    ft.TextButton("Распечатать", on_click=start_printing),
+                    ft.TextButton("Отмена", on_click=close_dialog)
+                ]
+            )
+            page.dialog.open = True
+            page.update()
+
         return ft.View(
             "/print_usb",
             controls=[
                 ft.Text("Печать с USB", size=30, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
-                ft.ElevatedButton("Распечатать документ", on_click=lambda _: print_document()),
+                ft.ElevatedButton("Обнаружить USB", on_click=check_usb),
+                file_list,
                 ft.Row([
                     ft.ElevatedButton("Назад", on_click=lambda _: page.go("/print"), width=150, height=50),
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
